@@ -1,0 +1,29 @@
+# Environment files (never commit secrets)
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+models/
+*.pt
+*.pth
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
