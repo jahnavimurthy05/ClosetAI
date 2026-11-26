@@ -20,9 +20,7 @@ async def verify_api_key(key: str = Security(api_key_header)):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Pre-warm models on startup
-    from services.background_removal import init_model
-    init_model()
+    # Models are lazy-loaded on first request so the HTTP port binds immediately
     yield
 
 
