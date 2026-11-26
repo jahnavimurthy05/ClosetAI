@@ -10,11 +10,11 @@ _session = None
 
 
 def init_model():
-    """Pre-warm the rembg u2net model on startup."""
+    """Initialise the lightweight rembg u2netp model (fits comfortably in 512 MiB RAM)."""
     global _session
     try:
-        _session = new_session("u2net")
-        logger.info("rembg u2net model initialised successfully.")
+        _session = new_session("u2netp")
+        logger.info("rembg u2netp model initialised successfully.")
     except Exception as exc:
         logger.warning(f"rembg model init failed (will retry on first request): {exc}")
         _session = None
