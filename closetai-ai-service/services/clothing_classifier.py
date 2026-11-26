@@ -80,7 +80,7 @@ async def classify_clothing(image_bytes: bytes) -> Dict:
 
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-flash-latest")
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
         response = await model.generate_content_async(

@@ -21,7 +21,7 @@ def _get_model():
         if not api_key:
             logger.warning("GEMINI_API_KEY is not set – AI stylist responses will be degraded.")
         genai.configure(api_key=api_key)
-        _model = genai.GenerativeModel("gemini-1.5-flash")
+        _model = genai.GenerativeModel("gemini-flash-latest")
     return _model
 
 

@@ -34,7 +34,8 @@ export async function POST(request: NextRequest) {
   const bytes = await file.arrayBuffer();
   const buffer = Buffer.from(bytes);
   const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-  const fileName = `${user.id}/${Date.now()}-${sanitizedName}`;
+  const timestamp = Date.now();
+  const fileName = `${user.id}/${timestamp}-${sanitizedName}`;
 
   const { error: uploadError } = await supabase.storage
     .from('wardrobe-images')
@@ -57,7 +58,9 @@ export async function POST(request: NextRequest) {
   const aiServiceSecret =
     process.env.AI_SERVICE_API_KEY || process.env.AI_SERVICE_SECRET;
 
-  let aiResult = null;
+  let aiResult: Record<string, unknown> | null = null;
+  let processedImageUrl: string | null = null;
+
   if (aiServiceUrl) {
     try {
       const aiFormData = new FormData();
@@ -71,11 +74,34 @@ export async function POST(request: NextRequest) {
         method: 'POST',
         headers: { 'X-API-Key': aiServiceSecret || '' },
         body: aiFormData,
-        signal: AbortSignal.timeout(60000),
+        signal: AbortSignal.timeout(90000),
       });
 
       if (aiResponse.ok) {
-        aiResult = await aiResponse.json();
+        const rawResult = await aiResponse.json();
+        const processedB64 = rawResult?.processed_image_base64;
+
+        if (typeof processedB64 === 'string' && processedB64.length > 0) {
+          const processedBuffer = Buffer.from(processedB64, 'base64');
+          const processedPath = `${user.id}/processed-${timestamp}.png`;
+          const { error: procUploadError } = await supabase.storage
+            .from('wardrobe-images')
+            .upload(processedPath, processedBuffer, {
+              contentType: 'image/png',
+              upsert: false,
+            });
+
+          if (!procUploadError) {
+            const { data: procSigned } = await supabase.storage
+              .from('wardrobe-images')
+              .createSignedUrl(processedPath, 60 * 60 * 24 * 365);
+            processedImageUrl = procSigned?.signedUrl || null;
+          }
+        }
+
+        // Strip large base64 before returning JSON to browser
+        const { processed_image_base64: _omit, ...rest } = rawResult;
+        aiResult = rest;
       }
     } catch (err) {
       console.error('AI service error:', err);
@@ -84,6 +110,7 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({
     original_image_url: originalUrl,
+    processed_image_url: processedImageUrl,
     storage_path: fileName,
     ai_result: aiResult,
     message: aiResult
