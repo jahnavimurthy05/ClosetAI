@@ -4,19 +4,14 @@ import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { Upload, ArrowLeft, Loader2, X, Sparkles, Wand2 } from 'lucide-react';
+import { Upload, FolderOpen, ArrowLeft, Loader2, Sparkles, CheckCheck } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import { Progress } from '@/components/ui/progress';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  BatchItemCard,
+  type BatchUploadItem,
+} from '@/components/wardrobe/BatchItemCard';
 import type { WardrobeCategory, FormalityLevel } from '@/types';
 
 const VALID_CATEGORIES: WardrobeCategory[] = [
@@ -73,38 +68,23 @@ function titleCase(str: string): string {
 export default function WardrobeUploadPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
-  const [file, setFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [originalImageUrl, setOriginalImageUrl] = useState<string | null>(null);
-  const [processedImageUrl, setProcessedImageUrl] = useState<string | null>(null);
+  const [items, setItems] = useState<BatchUploadItem[]>([]);
   const [dragActive, setDragActive] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [aiFilled, setAiFilled] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [savingAll, setSavingAll] = useState(false);
 
-  const [category, setCategory] = useState<WardrobeCategory>('tops');
-  const [subcategory, setSubcategory] = useState('');
-  const [name, setName] = useState('');
-  const [primaryColour, setPrimaryColour] = useState('');
-  const [secondaryColours, setSecondaryColours] = useState<string[]>([]);
-  const [colourHex, setColourHex] = useState('');
-  const [pattern, setPattern] = useState('solid');
-  const [fabricAppearance, setFabricAppearance] = useState('');
-  const [occasion, setOccasion] = useState('casual');
-  const [detectedOccasions, setDetectedOccasions] = useState<string[]>([]);
-  const [formality, setFormality] = useState<FormalityLevel>('casual');
-  const [styleTags, setStyleTags] = useState<string[]>([]);
-  const [seasons, setSeasons] = useState<string[]>(['all']);
-  const [description, setDescription] = useState('');
-  const [aiConfidence, setAiConfidence] = useState<number | null>(null);
+  const updateItem = (localId: string, patch: Partial<BatchUploadItem>) => {
+    setItems((prev) =>
+      prev.map((it) => (it.localId === localId ? { ...it, ...patch } : it))
+    );
+  };
 
-  const runAiAnalysis = async (selected: File) => {
-    setAnalyzing(true);
-    setAiFilled(false);
+  const analyzeSingleItem = async (entry: BatchUploadItem) => {
+    updateItem(entry.localId, { status: 'analyzing', errorMessage: undefined });
     try {
       const formData = new FormData();
-      formData.append('file', selected);
+      formData.append('file', entry.file);
 
       const res = await fetch('/api/wardrobe/process', {
         method: 'POST',
@@ -113,61 +93,44 @@ export default function WardrobeUploadPage() {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Could not process image');
+        throw new Error(err.error || 'AI processing failed');
       }
 
       const data = await res.json();
-      if (data.original_image_url) setOriginalImageUrl(data.original_image_url);
-      if (data.processed_image_url) {
-        setProcessedImageUrl(data.processed_image_url);
-        setPreviewUrl(data.processed_image_url);
-      }
-
       const ai = data.ai_result;
+      const patch: Partial<BatchUploadItem> = {
+        status: 'ready',
+        originalImageUrl: data.original_image_url || null,
+        processedImageUrl: data.processed_image_url || null,
+        previewUrl: data.processed_image_url || entry.previewUrl,
+      };
+
       if (ai) {
         const cls = ai.classification || {};
         const cols = ai.colours || {};
 
         if (cls.category && VALID_CATEGORIES.includes(cls.category)) {
-          setCategory(cls.category as WardrobeCategory);
+          patch.category = cls.category as WardrobeCategory;
         }
-        if (cls.subcategory) {
-          setSubcategory(titleCase(cls.subcategory));
-        }
+        if (cls.subcategory) patch.subcategory = titleCase(cls.subcategory);
         if (cols.primary && cols.primary !== 'unknown') {
-          setPrimaryColour(titleCase(cols.primary));
+          patch.primaryColour = titleCase(cols.primary);
         }
-        if (Array.isArray(cols.secondary)) {
-          setSecondaryColours(cols.secondary);
-        }
-        if (cols.hex) {
-          setColourHex(cols.hex);
-        }
-        if (cls.pattern) {
-          setPattern(cls.pattern);
-        }
+        if (Array.isArray(cols.secondary)) patch.secondaryColours = cols.secondary;
+        if (cols.hex) patch.colourHex = cols.hex;
+        if (cls.pattern) patch.pattern = cls.pattern;
         if (cls.fabric_appearance) {
-          setFabricAppearance(titleCase(cls.fabric_appearance));
+          patch.fabricAppearance = titleCase(cls.fabric_appearance);
         }
-        if (cls.formality) {
-          setFormality(mapFormality(cls.formality));
-        }
+        if (cls.formality) patch.formality = mapFormality(cls.formality);
         if (Array.isArray(cls.occasions) && cls.occasions.length > 0) {
-          setDetectedOccasions(cls.occasions);
-          setOccasion(mapOccasion(cls.occasions));
+          patch.detectedOccasions = cls.occasions;
+          patch.occasion = mapOccasion(cls.occasions);
         }
-        if (Array.isArray(cls.style_tags)) {
-          setStyleTags(cls.style_tags);
-        }
-        if (Array.isArray(cls.seasons)) {
-          setSeasons(cls.seasons);
-        }
-        if (cls.description) {
-          setDescription(cls.description);
-        }
-        if (typeof ai.ai_confidence === 'number') {
-          setAiConfidence(ai.ai_confidence);
-        }
+        if (Array.isArray(cls.style_tags)) patch.styleTags = cls.style_tags;
+        if (Array.isArray(cls.seasons)) patch.seasons = cls.seasons;
+        if (cls.description) patch.description = cls.description;
+        if (typeof ai.ai_confidence === 'number') patch.aiConfidence = ai.ai_confidence;
 
         const autoName = [
           cols.primary && cols.primary !== 'unknown' ? titleCase(cols.primary) : '',
@@ -175,63 +138,71 @@ export default function WardrobeUploadPage() {
         ]
           .filter(Boolean)
           .join(' ');
-        if (autoName) setName(autoName);
-
-        setAiFilled(true);
-        toast.success('AI detected your garment! Review or edit any field below.');
-      } else {
-        toast.info('Image uploaded. AI service is waking up — you can fill in details below.');
+        if (autoName) patch.name = autoName;
+        patch.aiFilled = true;
       }
+
+      updateItem(entry.localId, patch);
     } catch (err) {
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : 'AI analysis unavailable — you can still fill in details manually.'
-      );
-    } finally {
-      setAnalyzing(false);
+      updateItem(entry.localId, {
+        status: 'ready',
+        errorMessage: err instanceof Error ? err.message : 'Fill manually',
+      });
     }
   };
 
-  const handleFileSelect = (selected: File) => {
-    if (!selected.type.startsWith('image/')) {
-      toast.error('Please upload an image file');
-      return;
-    }
-    setFile(selected);
-    setOriginalImageUrl(null);
-    setProcessedImageUrl(null);
-    setPreviewUrl(URL.createObjectURL(selected));
-    void runAiAnalysis(selected);
-  };
+  const enqueueFiles = async (fileList: FileList | File[]) => {
+    const validFiles = Array.from(fileList).filter((f) =>
+      ['image/jpeg', 'image/png', 'image/webp'].includes(f.type) ||
+      /\.(jpe?g|png|webp)$/i.test(f.name)
+    );
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileSelect(e.dataTransfer.files[0]);
-    }
-  };
-
-  const handleResetImage = () => {
-    setFile(null);
-    setPreviewUrl(null);
-    setOriginalImageUrl(null);
-    setProcessedImageUrl(null);
-    setAiFilled(false);
-    setAiConfidence(null);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!file) {
-      toast.error('Please select an image to upload');
+    if (validFiles.length === 0) {
+      toast.error('No supported images found (use JPG, PNG, or WebP)');
       return;
     }
 
-    setSubmitting(true);
+    const newEntries: BatchUploadItem[] = validFiles.map((f, idx) => ({
+      localId: `${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+      file: f,
+      previewUrl: URL.createObjectURL(f),
+      originalImageUrl: null,
+      processedImageUrl: null,
+      status: 'queued',
+      aiFilled: false,
+      name: '',
+      category: 'tops',
+      subcategory: '',
+      primaryColour: '',
+      secondaryColours: [],
+      colourHex: '',
+      pattern: 'solid',
+      fabricAppearance: '',
+      occasion: 'casual',
+      detectedOccasions: [],
+      formality: 'casual',
+      styleTags: [],
+      seasons: ['all'],
+      description: '',
+      aiConfidence: null,
+    }));
+
+    setItems((prev) => [...prev, ...newEntries]);
+    toast.info(`Added ${newEntries.length} image(s). AI is analyzing them…`);
+
+    // Process sequentially so Render's free tier stays well within 512 MiB RAM
+    for (const entry of newEntries) {
+      await analyzeSingleItem(entry);
+    }
+  };
+
+  const saveSingleItem = async (localId: string): Promise<boolean> => {
+    const target = items.find((it) => it.localId === localId);
+    if (!target || target.status === 'saved') return false;
+
+    updateItem(localId, { status: 'saving' });
     try {
-      let finalOriginalUrl = originalImageUrl;
+      let finalOriginalUrl = target.originalImageUrl;
 
       if (!finalOriginalUrl) {
         const supabase = createClient();
@@ -242,14 +213,14 @@ export default function WardrobeUploadPage() {
         if (!user) {
           toast.error('Please sign in again');
           router.push('/login');
-          return;
+          return false;
         }
 
-        const ext = file.name.split('.').pop() || 'jpg';
-        const storagePath = `${user.id}/${Date.now()}.${ext}`;
+        const ext = target.file.name.split('.').pop() || 'jpg';
+        const storagePath = `${user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
         const { error: uploadError } = await supabase.storage
           .from('wardrobe-images')
-          .upload(storagePath, file);
+          .upload(storagePath, target.file);
 
         if (!uploadError) {
           const { data: signedData } = await supabase.storage
@@ -257,12 +228,12 @@ export default function WardrobeUploadPage() {
             .createSignedUrl(storagePath, 60 * 60 * 24 * 365);
           finalOriginalUrl = signedData?.signedUrl || storagePath;
         } else {
-          finalOriginalUrl = previewUrl || '/placeholder-garment.png';
+          finalOriginalUrl = target.previewUrl || '/placeholder-garment.png';
         }
       }
 
       const combinedOccasions = Array.from(
-        new Set([occasion, ...detectedOccasions].filter(Boolean))
+        new Set([target.occasion, ...target.detectedOccasions].filter(Boolean))
       );
 
       const res = await fetch('/api/wardrobe', {
@@ -270,307 +241,214 @@ export default function WardrobeUploadPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           original_image_url: finalOriginalUrl,
-          processed_image_url: processedImageUrl,
-          category,
-          subcategory: subcategory || null,
-          name: name || subcategory || category,
-          primary_colour: primaryColour || null,
-          secondary_colours: secondaryColours,
-          colour_hex: colourHex || null,
-          pattern: pattern || 'solid',
-          fabric_appearance: fabricAppearance || null,
-          style_tags: styleTags,
-          seasons,
+          processed_image_url: target.processedImageUrl,
+          category: target.category,
+          subcategory: target.subcategory || null,
+          name: target.name || target.subcategory || target.category,
+          primary_colour: target.primaryColour || null,
+          secondary_colours: target.secondaryColours,
+          colour_hex: target.colourHex || null,
+          pattern: target.pattern || 'solid',
+          fabric_appearance: target.fabricAppearance || null,
+          style_tags: target.styleTags,
+          seasons: target.seasons,
           occasions: combinedOccasions,
-          formality,
-          description: description || null,
-          ai_confidence: aiConfidence,
+          formality: target.formality,
+          description: target.description || null,
+          ai_confidence: target.aiConfidence,
         }),
       });
 
       if (!res.ok) {
-        const err = await res.json();
+        const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'Failed to save item');
       }
 
-      toast.success('Item added to your wardrobe!');
-      router.push('/wardrobe');
-      router.refresh();
+      updateItem(localId, { status: 'saved' });
+      return true;
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Upload failed');
-    } finally {
-      setSubmitting(false);
+      updateItem(localId, {
+        status: 'error',
+        errorMessage: err instanceof Error ? err.message : 'Save failed',
+      });
+      toast.error(err instanceof Error ? err.message : 'Failed to save item');
+      return false;
     }
   };
 
+  const handleSaveAll = async () => {
+    const unsaved = items.filter(
+      (it) => it.status === 'ready' || it.status === 'error'
+    );
+    if (unsaved.length === 0) return;
+
+    setSavingAll(true);
+    let savedCount = 0;
+    for (const entry of unsaved) {
+      const ok = await saveSingleItem(entry.localId);
+      if (ok) savedCount += 1;
+    }
+    setSavingAll(false);
+
+    if (savedCount > 0) {
+      toast.success(`Saved ${savedCount} item(s) to your wardrobe!`);
+      router.push('/wardrobe');
+      router.refresh();
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      void enqueueFiles(e.dataTransfer.files);
+    }
+  };
+
+  const analyzedCount = items.filter(
+    (it) => it.status !== 'queued' && it.status !== 'analyzing'
+  ).length;
+  const readyCount = items.filter(
+    (it) => it.status === 'ready' || it.status === 'error'
+  ).length;
+  const progressPct = items.length > 0 ? Math.round((analyzedCount / items.length) * 100) : 0;
+
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
-        <Link
-          href="/wardrobe"
-          className="p-2 rounded-lg bg-white border border-[#E8DFD3] text-[#252525] hover:bg-[#F8F6F2] transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" />
-        </Link>
-        <div>
-          <h1 className="font-serif text-3xl font-light text-[#252525]">Add Wardrobe Item</h1>
-          <p className="text-sm text-[#A99B8C]">
-            Upload a photo — AI will auto-fill the details for you to review or edit
-          </p>
-        </div>
-      </div>
-
-      <form
-        onSubmit={handleSubmit}
-        className="bg-white rounded-xl shadow-sm border border-[#E8DFD3]/60 p-6 space-y-6"
-      >
-        {/* Drop Zone */}
-        {!previewUrl ? (
-          <div
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragActive(true);
-            }}
-            onDragLeave={() => setDragActive(false)}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all duration-150 ${
-              dragActive
-                ? 'border-[#252525] bg-[#F8F6F2]'
-                : 'border-[#E8DFD3] hover:border-[#A99B8C]'
-            }`}
+    <div className="max-w-5xl mx-auto space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Link
+            href="/wardrobe"
+            className="p-2 rounded-lg bg-white border border-[#E8DFD3] text-[#252525] hover:bg-[#F8F6F2] transition-colors"
           >
-            <Upload className="w-10 h-10 text-[#A99B8C] mx-auto mb-3" />
-            <p className="font-medium text-[#252525]">
-              Drag and drop your garment photo here
+            <ArrowLeft className="w-4 h-4" />
+          </Link>
+          <div>
+            <h1 className="font-serif text-3xl font-light text-[#252525]">
+              Add Wardrobe Items
+            </h1>
+            <p className="text-sm text-[#A99B8C]">
+              Upload single photos or an entire folder — AI auto-fills every item for you to review &amp; edit
             </p>
-            <p className="text-xs text-[#A99B8C] mt-1">
-              or click to browse (JPG, PNG, WebP)
-            </p>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files?.[0]) handleFileSelect(e.target.files[0]);
-              }}
-            />
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="relative w-56 mx-auto">
-              <img
-                src={previewUrl}
-                alt="Preview"
-                className="w-full aspect-[3/4] object-cover rounded-xl border border-[#E8DFD3] bg-[#F8F6F2]"
-              />
-              <button
-                type="button"
-                onClick={handleResetImage}
-                aria-label="Remove image"
-                className="absolute -top-2 -right-2 p-1.5 rounded-full bg-[#252525] text-white shadow-sm hover:bg-black"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            {analyzing && (
-              <div className="flex items-center justify-center gap-2 text-sm text-[#252525] bg-[#F8F6F2] border border-[#E8DFD3] rounded-lg py-2.5 px-4">
-                <Loader2 className="w-4 h-4 animate-spin text-[#A99B8C]" />
-                <span>Analyzing garment with AI (removing background &amp; detecting details)…</span>
-              </div>
-            )}
-
-            {!analyzing && aiFilled && (
-              <div className="flex items-center justify-center gap-2 text-xs text-[#252525] bg-[#F8F6F2] border border-[#D9B7B0] rounded-lg py-2 px-4">
-                <Wand2 className="w-3.5 h-3.5 text-[#A99B8C]" />
-                <span>
-                  AI auto-filled the fields below — edit anything if needed before saving.
-                </span>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Details Form */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="name" className="text-sm text-[#252525]">
-              Item Name
-            </Label>
-            <Input
-              id="name"
-              placeholder="e.g. Ivory Silk Blouse"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="border-[#E8DFD3] rounded-lg"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-sm text-[#252525]">Category</Label>
-            <Select
-              value={category}
-              onValueChange={(v) => setCategory(v as WardrobeCategory)}
-            >
-              <SelectTrigger className="border-[#E8DFD3] rounded-lg">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="tops">Tops</SelectItem>
-                <SelectItem value="bottoms">Bottoms</SelectItem>
-                <SelectItem value="dresses">Dresses</SelectItem>
-                <SelectItem value="outerwear">Outerwear</SelectItem>
-                <SelectItem value="footwear">Footwear</SelectItem>
-                <SelectItem value="accessories">Accessories</SelectItem>
-                <SelectItem value="bags">Bags</SelectItem>
-                <SelectItem value="activewear">Activewear</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="subcategory" className="text-sm text-[#252525]">
-              Subcategory
-            </Label>
-            <Input
-              id="subcategory"
-              placeholder="e.g. Blouse, Blazer, Midi Skirt"
-              value={subcategory}
-              onChange={(e) => setSubcategory(e.target.value)}
-              className="border-[#E8DFD3] rounded-lg"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="colour" className="text-sm text-[#252525]">
-              Primary Colour
-            </Label>
-            <div className="flex items-center gap-2">
-              {colourHex && (
-                <span
-                  className="w-8 h-9 rounded-lg border border-[#E8DFD3] shrink-0"
-                  style={{ backgroundColor: colourHex }}
-                  title={colourHex}
-                />
-              )}
-              <Input
-                id="colour"
-                placeholder="e.g. Ivory, Navy, Charcoal"
-                value={primaryColour}
-                onChange={(e) => setPrimaryColour(e.target.value)}
-                className="border-[#E8DFD3] rounded-lg"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="pattern" className="text-sm text-[#252525]">
-              Pattern
-            </Label>
-            <Input
-              id="pattern"
-              placeholder="e.g. Solid, Floral, Striped"
-              value={pattern}
-              onChange={(e) => setPattern(e.target.value)}
-              className="border-[#E8DFD3] rounded-lg"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="fabric" className="text-sm text-[#252525]">
-              Fabric Appearance
-            </Label>
-            <Input
-              id="fabric"
-              placeholder="e.g. Cotton, Silk, Denim"
-              value={fabricAppearance}
-              onChange={(e) => setFabricAppearance(e.target.value)}
-              className="border-[#E8DFD3] rounded-lg"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="occasion" className="text-sm text-[#252525]">
-              Primary Occasion
-            </Label>
-            <Select value={occasion} onValueChange={(v) => setOccasion(v ?? 'casual')}>
-              <SelectTrigger className="border-[#E8DFD3] rounded-lg">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="casual">Casual</SelectItem>
-                <SelectItem value="work">Work / Office</SelectItem>
-                <SelectItem value="date_night">Date Night</SelectItem>
-                <SelectItem value="formal_event">Formal Event</SelectItem>
-                <SelectItem value="travel">Travel</SelectItem>
-                <SelectItem value="weekend">Weekend</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-sm text-[#252525]">Formality</Label>
-            <Select
-              value={formality}
-              onValueChange={(v) => setFormality(v as FormalityLevel)}
-            >
-              <SelectTrigger className="border-[#E8DFD3] rounded-lg">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="very_casual">Very Casual</SelectItem>
-                <SelectItem value="casual">Casual</SelectItem>
-                <SelectItem value="smart_casual">Smart Casual</SelectItem>
-                <SelectItem value="semi_formal">Semi Formal</SelectItem>
-                <SelectItem value="formal">Formal</SelectItem>
-                <SelectItem value="black_tie">Black Tie</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2 sm:col-span-2">
-            <Label htmlFor="description" className="text-sm text-[#252525]">
-              Description
-            </Label>
-            <Textarea
-              id="description"
-              rows={2}
-              placeholder="AI-generated searchable description (you can edit it)"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="border-[#E8DFD3] rounded-lg"
-            />
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 pt-2">
-          <Link href="/wardrobe">
-            <Button type="button" variant="outline" className="rounded-lg border-[#E8DFD3]">
-              Cancel
-            </Button>
-          </Link>
+        {readyCount > 0 && (
           <Button
-            type="submit"
-            disabled={submitting || analyzing}
+            type="button"
+            disabled={savingAll}
+            onClick={handleSaveAll}
             className="bg-[#252525] hover:bg-[#3a3a3a] text-white rounded-lg"
           >
-            {submitting ? (
+            {savingAll ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Saving…
+                Saving All…
               </>
             ) : (
               <>
-                <Sparkles className="w-4 h-4 mr-2 text-[#D9B7B0]" />
-                Save to Wardrobe
+                <CheckCheck className="w-4 h-4 mr-2 text-[#D9B7B0]" />
+                Save All Ready ({readyCount})
               </>
             )}
           </Button>
+        )}
+      </div>
+
+      {/* Drop Zone & Folder Picker */}
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragActive(true);
+        }}
+        onDragLeave={() => setDragActive(false)}
+        onDrop={handleDrop}
+        className={`bg-white border-2 border-dashed rounded-xl p-8 text-center transition-all duration-150 ${
+          dragActive
+            ? 'border-[#252525] bg-[#F8F6F2]'
+            : 'border-[#E8DFD3] hover:border-[#A99B8C]'
+        }`}
+      >
+        <Upload className="w-10 h-10 text-[#A99B8C] mx-auto mb-3" />
+        <p className="font-medium text-[#252525]">
+          Drag &amp; drop garment photos here, or choose files / a whole folder
+        </p>
+        <p className="text-xs text-[#A99B8C] mt-1 mb-4">
+          Supports JPG, PNG, WebP — all detected details remain open to edit before saving
+        </p>
+
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+            className="border-[#E8DFD3] rounded-lg"
+          >
+            <Sparkles className="w-4 h-4 mr-2 text-[#A99B8C]" />
+            Select Photos
+          </Button>
+          <Button
+            type="button"
+            onClick={() => folderInputRef.current?.click()}
+            className="bg-[#252525] hover:bg-[#3a3a3a] text-white rounded-lg"
+          >
+            <FolderOpen className="w-4 h-4 mr-2 text-[#D9B7B0]" />
+            Upload Folder
+          </Button>
         </div>
-      </form>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files?.length) void enqueueFiles(e.target.files);
+            e.target.value = '';
+          }}
+        />
+        <input
+          ref={folderInputRef}
+          type="file"
+          multiple
+          accept="image/*"
+          {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files?.length) void enqueueFiles(e.target.files);
+            e.target.value = '';
+          }}
+        />
+      </div>
+
+      {/* Progress Bar */}
+      {items.length > 0 && analyzedCount < items.length && (
+        <div className="bg-white rounded-xl border border-[#E8DFD3]/70 p-4 space-y-2">
+          <div className="flex justify-between text-xs text-[#252525]">
+            <span>AI analyzing your wardrobe photos…</span>
+            <span>
+              {analyzedCount} / {items.length} ready
+            </span>
+          </div>
+          <Progress value={progressPct} className="h-2" />
+        </div>
+      )}
+
+      {/* Editable Review Cards */}
+      <div className="space-y-4">
+        {items.map((item) => (
+          <BatchItemCard
+            key={item.localId}
+            item={item}
+            onChange={updateItem}
+            onSave={(id) => void saveSingleItem(id)}
+            onRemove={(id) =>
+              setItems((prev) => prev.filter((it) => it.localId !== id))
+            }
+          />
+        ))}
+      </div>
     </div>
   );
 }
