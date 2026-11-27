@@ -392,7 +392,7 @@ def generate_outfit_combinations(
     occasion: str,
     user_profile: Dict,
     weather: Dict = None,
-    top_n: int = 5,
+    top_n: int | None = None,
 ) -> List[Dict]:
     """
     Generate and score outfit combinations from the user's wardrobe.
@@ -434,8 +434,8 @@ def generate_outfit_combinations(
     occ_key = _norm(occasion)
 
     # --- Top + Bottom combinations ---
-    for top in tops[:12]:
-        for bottom in bottoms[:12]:
+    for top in tops[:30]:
+        for bottom in bottoms[:30]:
             outfit = [top, bottom]
 
             # Add occasion-appropriate outerwear (e.g. blazer for office/interview/formal)
@@ -464,7 +464,7 @@ def generate_outfit_combinations(
             )
 
     # --- Dress combinations ---
-    for dress in dresses[:12]:
+    for dress in dresses[:30]:
         outfit = [dress]
         best_shoe = _pick_best_companion(footwear, outfit, occasion)
         if best_shoe:
@@ -485,6 +485,7 @@ def generate_outfit_combinations(
         )
 
     combinations.sort(key=lambda x: x["score"], reverse=True)
+    limit = top_n if (top_n is not None and top_n > 0) else min(len(combinations), 60)
 
     # Diversity pass: pick unique tops/dresses first (and vary bottoms/shoes)
     selected: List[Dict] = []
@@ -494,14 +495,13 @@ def generate_outfit_combinations(
 
     # Pass 1: unique primary piece (top or dress), preferring unused bottoms too
     for combo in combinations:
-        if len(selected) >= top_n:
+        if len(selected) >= limit:
             break
         items = combo["items"]
         primary_id = str(items[0].get("id", ""))
         bottom_id = str(items[1].get("id", "")) if len(items) > 1 and _norm(items[1].get("category")) == "bottoms" else ""
         if primary_id in used_primary_ids:
             continue
-        # If multiple bottoms exist, prefer an unused bottom when possible
         if bottom_id and bottom_id in used_bottom_ids:
             has_alt = any(
                 str(c["items"][0].get("id", "")) == primary_id
@@ -516,9 +516,9 @@ def generate_outfit_combinations(
             used_bottom_ids.add(bottom_id)
         used_combo_keys.add(tuple(str(i.get("id", "")) for i in items))
 
-    # Pass 2: if user has fewer than top_n distinct tops/dresses, fill remaining slots with unique pairs
+    # Pass 2: include all remaining unique combinations sorted by score
     for combo in combinations:
-        if len(selected) >= top_n:
+        if len(selected) >= limit:
             break
         key = tuple(str(i.get("id", "")) for i in combo["items"])
         if key not in used_combo_keys:

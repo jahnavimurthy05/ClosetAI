@@ -27,7 +27,7 @@ class RecommendRequest(BaseModel):
     occasion: str
     user_profile: Optional[Dict[str, Any]] = {}
     weather: Optional[Dict[str, Any]] = None
-    top_n: Optional[int] = 5
+    top_n: Optional[int] = None
     exclude_outfit_ids: Optional[List[str]] = []
 
 
