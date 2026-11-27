@@ -249,21 +249,31 @@ def _profile_alignment_score(outfit_items: List[Dict], user_profile: Dict) -> fl
 # ---------------------------------------------------------------------------
 
 
+def _item_label(item: Dict) -> str:
+    name = (item.get("name") or item.get("subcategory") or item.get("category") or "item").strip()
+    colour = (item.get("primary_colour") or "").strip()
+    if colour and colour.lower() != "unknown" and colour.lower() not in name.lower():
+        return f"{colour} {name}"
+    return name
+
+
 def _build_explanation(scores: Dict, items: List[Dict], occasion: str, profile: Dict) -> Dict:
     explanations: Dict[str, str] = {}
+    core_labels = [_item_label(i) for i in items if _norm(i.get("category")) in {"tops", "bottoms", "dresses", "outerwear"}]
+    combo_str = " + ".join(core_labels[:3]) if core_labels else "This combination"
 
     colour_score = scores.get("colour", 0)
     if colour_score >= 0.9:
         explanations["colour"] = (
-            "These colours pair naturally together with strong contrast and balance."
+            f"{combo_str}: these tones pair naturally together with strong contrast and balance."
         )
     elif colour_score >= 0.7:
         explanations["colour"] = (
-            "The colour palette works harmoniously with balanced tones."
+            f"{combo_str}: balanced colour tones that work harmoniously together."
         )
     else:
         explanations["colour"] = (
-            "Adding a neutral accessory or layer will tie these tones together."
+            f"{combo_str}: adding a neutral accessory or layer will tie these tones together."
         )
 
     formality_score = scores.get("formality", 0)
@@ -475,4 +485,44 @@ def generate_outfit_combinations(
         )
 
     combinations.sort(key=lambda x: x["score"], reverse=True)
-    return combinations[:top_n]
+
+    # Diversity pass: pick unique tops/dresses first (and vary bottoms/shoes)
+    selected: List[Dict] = []
+    used_primary_ids: Set[str] = set()
+    used_bottom_ids: Set[str] = set()
+    used_combo_keys: Set[tuple] = set()
+
+    # Pass 1: unique primary piece (top or dress), preferring unused bottoms too
+    for combo in combinations:
+        if len(selected) >= top_n:
+            break
+        items = combo["items"]
+        primary_id = str(items[0].get("id", ""))
+        bottom_id = str(items[1].get("id", "")) if len(items) > 1 and _norm(items[1].get("category")) == "bottoms" else ""
+        if primary_id in used_primary_ids:
+            continue
+        # If multiple bottoms exist, prefer an unused bottom when possible
+        if bottom_id and bottom_id in used_bottom_ids:
+            has_alt = any(
+                str(c["items"][0].get("id", "")) == primary_id
+                and (len(c["items"]) > 1 and str(c["items"][1].get("id", "")) not in used_bottom_ids)
+                for c in combinations
+            )
+            if has_alt:
+                continue
+        selected.append(combo)
+        used_primary_ids.add(primary_id)
+        if bottom_id:
+            used_bottom_ids.add(bottom_id)
+        used_combo_keys.add(tuple(str(i.get("id", "")) for i in items))
+
+    # Pass 2: if user has fewer than top_n distinct tops/dresses, fill remaining slots with unique pairs
+    for combo in combinations:
+        if len(selected) >= top_n:
+            break
+        key = tuple(str(i.get("id", "")) for i in combo["items"])
+        if key not in used_combo_keys:
+            selected.append(combo)
+            used_combo_keys.add(key)
+
+    return selected
