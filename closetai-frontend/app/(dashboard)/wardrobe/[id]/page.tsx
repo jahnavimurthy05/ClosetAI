@@ -26,7 +26,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import type { WardrobeItem } from '@/types';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import type { WardrobeItem, WardrobeCategory, FormalityLevel } from '@/types';
 
 export default function WardrobeItemDetailPage({
   params,
@@ -43,8 +50,10 @@ export default function WardrobeItemDetailPage({
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const [name, setName] = useState('');
+  const [category, setCategory] = useState<WardrobeCategory>('tops');
   const [subcategory, setSubcategory] = useState('');
   const [primaryColour, setPrimaryColour] = useState('');
+  const [formality, setFormality] = useState<FormalityLevel>('casual');
   const [brand, setBrand] = useState('');
   const [description, setDescription] = useState('');
 
@@ -57,8 +66,10 @@ export default function WardrobeItemDetailPage({
         const data: WardrobeItem = json.data;
         setItem(data);
         setName(data.name || '');
+        setCategory(data.category || 'tops');
         setSubcategory(data.subcategory || '');
         setPrimaryColour(data.primary_colour || '');
+        setFormality(data.formality || 'casual');
         setBrand(data.brand || '');
         setDescription(data.description || '');
       } catch {
@@ -78,8 +89,10 @@ export default function WardrobeItemDetailPage({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: name || null,
+          category,
           subcategory: subcategory || null,
           primary_colour: primaryColour || null,
+          formality,
           brand: brand || null,
           description: description || null,
         }),
@@ -255,12 +268,53 @@ export default function WardrobeItemDetailPage({
                 />
               </div>
               <div className="space-y-2">
+                <Label>Category</Label>
+                <Select
+                  value={category}
+                  onValueChange={(v) => setCategory(v as WardrobeCategory)}
+                >
+                  <SelectTrigger className="border-[#E8DFD3] rounded-lg">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="tops">Tops</SelectItem>
+                    <SelectItem value="bottoms">Bottoms</SelectItem>
+                    <SelectItem value="dresses">Dresses</SelectItem>
+                    <SelectItem value="outerwear">Outerwear</SelectItem>
+                    <SelectItem value="footwear">Footwear</SelectItem>
+                    <SelectItem value="accessories">Accessories</SelectItem>
+                    <SelectItem value="bags">Bags</SelectItem>
+                    <SelectItem value="activewear">Activewear</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
                 <Label>Subcategory</Label>
                 <Input
                   value={subcategory}
                   onChange={(e) => setSubcategory(e.target.value)}
                   className="border-[#E8DFD3] rounded-lg"
                 />
+              </div>
+              <div className="space-y-2">
+                <Label>Formality</Label>
+                <Select
+                  value={formality}
+                  onValueChange={(v) => setFormality(v as FormalityLevel)}
+                >
+                  <SelectTrigger className="border-[#E8DFD3] rounded-lg">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="very_casual">Very Casual</SelectItem>
+                    <SelectItem value="casual">Casual</SelectItem>
+                    <SelectItem value="smart_casual">Smart Casual</SelectItem>
+                    <SelectItem value="semi_formal">Semi Formal</SelectItem>
+                    <SelectItem value="formal">Formal</SelectItem>
+                    <SelectItem value="black_tie">Black Tie</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label>Primary Colour</Label>
